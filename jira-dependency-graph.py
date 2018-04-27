@@ -3,17 +3,33 @@
 from __future__ import print_function
 
 import argparse
-import json
 import sys
 import getpass
 
 import requests
-
-from collections import OrderedDict
+import textwrap
 
 
 GOOGLE_CHART_URL = 'http://chart.apis.google.com/chart'
 MAX_SUMMARY_LENGTH = 30
+MAX_SUMMARY_HEIGHT = 4
+
+STATUS_COLORS = {
+    'NEW': '#ffe599ff',
+    'OPEN': '#ffe599ff',
+    'READY FOR DEV': '#ffe599ff',
+    'IN PROGRESS': '#b6d7a8ff',
+    'REWORKING': '#b6d7a8ff',
+    'CODE REVIEW': '#a4c2f4ff',
+    'P.R MADE': '#a4c2f4ff',
+    'QA REVIEW': '#a4c2f4ff',
+    'READY FOR QA': '#a4c2f4ff',
+    'RESOLVED': '#d9d9d9ff',
+    'VERIFIED': '#d9d9d9ff',
+    'MERGED': '#d9d9d9ff',
+    'CLOSED': '#d9d9d9ff',
+    'DONE': '#d9d9d9ff'
+}
 
 
 def log(*args):
@@ -68,26 +84,31 @@ def build_graph_data(start_issue_key, jira, excludes, show_directions, direction
         return issue['key']
 
     def get_status_color(status_field):
-        status = status_field['statusCategory']['name'].upper()
-        if status == 'IN PROGRESS':
-            return 'yellow'
-        elif status == 'DONE':
-            return 'green'
-        return 'white'
+        status = status_field['name'].upper()
+        return STATUS_COLORS.get(status, 'white')
+
+    def format_summary(summary):
+
+        blanks = ['']*MAX_SUMMARY_HEIGHT
+        lines = textwrap.wrap(summary.replace('"', '\\"'), MAX_SUMMARY_LENGTH) + blanks
+
+        if len(lines) > MAX_SUMMARY_HEIGHT:
+            lines = lines[0:MAX_SUMMARY_HEIGHT]
+
+            last_line = lines[-1]
+            if len(last_line) >= MAX_SUMMARY_LENGTH - 1:
+                lines[-1] = '%s&hellip;' % last_line[:MAX_SUMMARY_LENGTH-3]
+
+        return '\n'.join(lines)
 
     def create_node_text(issue_key, fields, islink=True):
-        summary = fields['summary']
+        summary = format_summary(fields['summary'])
         status = fields['status']
-        # truncate long labels with "...", but only if the three dots are replacing more than two characters
-        # -- otherwise the truncated label would be taking more space than the original.
-        if len(summary) > MAX_SUMMARY_LENGTH + 2:
-            summary = summary[:MAX_SUMMARY_LENGTH] + '...'
-        summary = summary.replace('"', '\\"')
-        # log('node ' + issue_key + ' status = ' + str(status))
+        #log('node ' + issue_key + ' status = ' + str(status))
 
         if islink:
-            return '"{}\\n({})"'.format(issue_key, summary.encode('utf-8'))
-        return '"{}\\n({})" [href="{}", fillcolor="{}", style=filled]'.format(issue_key, summary.encode('utf-8'), jira.get_issue_uri(issue_key), get_status_color(status))
+            return '"{}\\n{}"'.format(issue_key, summary.encode('utf-8'))
+        return '"{}\\n{}" [href="{}", fillcolor="{}", style=filled]'.format(issue_key, summary.encode('utf-8'), jira.get_issue_uri(issue_key), get_status_color(status))
 
     def process_link(fields, issue_key, link):
         if link.has_key('outwardIssue'):
@@ -201,7 +222,6 @@ def create_graph_image(graph_data, image_file, node_shape):
     digraph = 'digraph{node [shape=' + node_shape +'];%s}' % ';'.join(graph_data)
 
     response = requests.post(GOOGLE_CHART_URL, data = {'cht':'gv', 'chl': digraph})
-
     with open(image_file, 'w+') as image:
         print('Writing to ' + image_file)
         image.write(response.content)
